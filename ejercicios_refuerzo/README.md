@@ -287,7 +287,8 @@ int main() {
     }
 
     return 0;
-}```
+}
+```
 
 - La función ```wait(NULL)``` en el proceso padre garantiza que el proceso hijo termine primero.
 - Esto asegura que "Hello" siempre se imprima antes de "Goodbye".
@@ -344,7 +345,8 @@ int main() {
     }
 
     return 0;
-}```
+}
+```
 
 La familia exec() tiene varias variantes para cubrir diferentes casos de uso y hacer más flexible la sustitución del proceso:
 
@@ -396,7 +398,8 @@ int main() {
     }
 
     return 0;
-}```
+}
+```
 
 - Si se usa wait() en el proceso hijo, no habrá ningún efecto porque el proceso hijo no tiene procesos hijos propios.
 
@@ -438,7 +441,8 @@ int main() {
     }
 
     return 0;
-}```
+}
+```
 
 Ejemplo de Caso de Uso de waitpid()
 Supongamos que un proceso padre tiene tres hijos (hijo1, hijo2, hijo3). En un escenario donde cada hijo tiene una tarea específica que depende del orden de ejecución, podrías necesitar que el proceso padre espere primero la finalización de hijo2 antes de proceder a hacer algo con los datos generados por él, sin importar el estado de hijo1 y hijo3. En este caso, waitpid(pid_hijo2, &status, 0) garantiza que el padre espere solo por el hijo2.
@@ -521,7 +525,8 @@ int main() {
     wait(NULL);
 
     return 0;
-}```
+}
+```
 
 **¿Cuándo es Útil pipe()?**
 - pipe() es extremadamente útil para comunicar procesos entre sí, permitiendo que la salida de un proceso sea la entrada de otro.
@@ -593,7 +598,8 @@ int main(int argc, char *argv[]) {
     }
 
     return 0;
-}```
+}
+```
 
 **Explicación de ```execvp()```**
 - ```execvp(argv[1], &argv[1])```:

@@ -64,30 +64,32 @@ void run_cd(char **args, int num_args)
 // Comando integrado "path": establece el path de búsqueda del shell
 void set_path(char **args, int num_args)
 {
-    free_path(); // Libera la memoria del path anterior
+    // Primero, libera la configuración anterior del path
+    free_path();
 
+    // Luego, establece el nuevo path con los argumentos proporcionados
     for (int i = 1; i < num_args; i++)
     {
-        if (path_count < MAX_PATH) // Agrega cada nuevo directorio especificado al path
+        if (path_count < MAX_PATH)
         {
             path[path_count] = strdup(args[i]);
             path_count++;
         }
-        else
-        {
-            break;
-        }
     }
+
+    // Si no se especificaron nuevos directorios, path_count se queda en 0,
+    // lo que significa que el shell no debería ejecutar comandos externos.
 }
 
 // Ejecuta un comando externo en un proceso hijo
 int run_external_command(char **args)
 {
-    char command_path[256]; // Almacena el path completo del comando
+    char command_path[256];
 
+    // Verificación inicial de que el path no está vacío
     if (path_count == 0)
     {
-        // Si la ruta está vacía, ningún comando externo debería ejecutarse
+        // Imprime el mensaje de error estándar y sale sin intentar ejecutar el comando
         write(STDERR_FILENO, error_message, strlen(error_message));
         return -1;
     }
@@ -95,17 +97,18 @@ int run_external_command(char **args)
     for (int i = 0; i < path_count; i++)
     {
         // Construye el path completo del comando usando el directorio actual del path
-        snprintf(command_path, sizeof(command_path), "%s%s", path[i], args[0]);
+        snprintf(command_path, sizeof(command_path), "%s/%s", path[i], args[0]);
 
-        // Verifica si el comando es ejecutable
+        // Verifica si el comando es ejecutable en este path
         if (access(command_path, X_OK) == 0)
         {
-            execv(command_path, args); // Ejecuta el comando en el proceso hijo
-            perror("execv");           // Si execv falla, imprime el error del sistema
+            execv(command_path, args); // Ejecuta el comando si es accesible
+            perror("execv");           // Si execv falla, muestra el error del sistema
             return -1;
         }
     }
-    // Si ningún path contiene el comando, muestra mensaje de error
+
+    // Si no se encuentra el comando en ningún directorio del path
     write(STDERR_FILENO, error_message, strlen(error_message));
     return -1;
 }

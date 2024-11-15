@@ -127,6 +127,26 @@ int parse_input(char *input, char **args)
     return num_args;       // Retorna el número de argumentos
 }
 
+// Revisa si el formato de la redirección es correcto
+int handle_redirection(char **args, int num_args)
+{
+    for (int i = 0; i < num_args; i++)
+    {
+        if (strcmp(args[i], ">") == 0)
+        {
+            // Verifica si hay un archivo especificado después del operador '>'
+            if (i == num_args - 1)
+            {
+                write(STDERR_FILENO, error_message, strlen(error_message));
+                return -1;
+            }
+            // Redirección está correctamente especificada
+            // Implementa la lógica de redirección aquí si es necesario
+        }
+    }
+    return 0;
+}
+
 // Loop principal del shell: muestra el prompt, lee entrada, y ejecuta comandos
 void shell_loop(FILE *input_stream)
 {
@@ -153,6 +173,12 @@ void shell_loop(FILE *input_stream)
         num_args = parse_input(input, args);
         if (num_args == 0)
             continue; // Si la entrada está vacía, salta al siguiente ciclo
+
+        // Verifica redirección incorrecta antes de ejecutar el comando
+        if (handle_redirection(args, num_args) == -1)
+        {
+            continue; // Salta a la siguiente línea de entrada sin ejecutar el comando
+        }
 
         // Verifica y ejecuta los comandos integrados
         if (strcmp(args[0], "exit") == 0)

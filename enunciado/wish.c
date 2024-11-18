@@ -5,6 +5,8 @@
 #include <sys/wait.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <linux/stat.h>
+#include <sys/stat.h>
 
 #define MAX_INPUT 1024 // Tamaño máximo de entrada para una línea de comando
 #define MAX_ARGS 64    // Máximo número de argumentos en un comando
@@ -214,52 +216,12 @@ void shell_loop(FILE *input_stream)
         if (num_args == 0)
             continue; // Si la entrada está vacía, salta al siguiente ciclo
 
-        // Verifica redirección antes de ejecutar el comando
+        // Manejo de redirección
+        int saved_stdout = dup(STDOUT_FILENO); // Guarda el stdout original
         int redirection_result = handle_redirection(args, &num_args);
         if (redirection_result == -1)
         {
-            // Si hay un error en la redirección, pasa al siguiente comando
-            continue;
-        }
-
-        // Si hubo redirección, recuerda restaurar stdout al final
-        if (redirection_result == 1)
-        {
-            // Ejecutar el comando como siempre
-            pid_t pid = fork();
-            if (pid == 0)
-            {
-                run_external_command(args);
-                exit(1); // Si exec falla
-            }
-            else if (pid > 0)
-            {
-                wait(NULL);
-            }
-            else
-            {
-                write(STDERR_FILENO, error_message, strlen(error_message));
-            }
-
-            // Restaurar stdout al valor predeterminado
-            dup2(STDOUT_FILENO, fileno(stdout));
-        }
-
-        // Limpia los argumentos si hay redirección
-        int redirect_index = -1;
-        for (int i = 0; i < num_args; i++)
-        {
-            if (strcmp(args[i], ">") == 0)
-            {
-                redirect_index = i;
-                break;
-            }
-        }
-
-        if (redirect_index != -1)
-        {
-            args[redirect_index] = NULL; // Finaliza los argumentos en el operador '>'
-            num_args = redirect_index;   // Ajusta el conteo de argumentos
+            continue; // Si hay un error en la redirección, pasa al siguiente comando
         }
 
         // Verifica y ejecuta los comandos integrados
@@ -267,7 +229,6 @@ void shell_loop(FILE *input_stream)
         {
             run_exit(num_args);
         }
-
         else if (strcmp(args[0], "cd") == 0)
         {
             run_cd(args, num_args);
@@ -278,24 +239,27 @@ void shell_loop(FILE *input_stream)
         }
         else
         {
-            // Para comandos externos, crea un proceso hijo con fork()
             pid_t pid = fork();
             if (pid == 0)
             {
-                // En el proceso hijo: intenta ejecutar el comando externo
                 run_external_command(args);
-                exit(1); // Termina el hijo si el comando falla
+                exit(1);
             }
             else if (pid > 0)
             {
-                // En el proceso padre: espera a que el hijo termine
                 wait(NULL);
             }
             else
             {
-                // Error en fork()
                 write(STDERR_FILENO, error_message, strlen(error_message));
             }
+        }
+
+        // Restaura el stdout original después de la redirección
+        if (redirection_result == 1)
+        {
+            dup2(saved_stdout, STDOUT_FILENO);
+            close(saved_stdout);
         }
     }
 }

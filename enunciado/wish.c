@@ -216,6 +216,12 @@ void shell_loop(FILE *input_stream)
         if (num_args == 0)
             continue; // Si la entrada está vacía, salta al siguiente ciclo
 
+        // Verifica si el primer argumento es '&' (error)
+        if (num_args == 1 && strcmp(args[0], "&") == 0)
+        {
+            continue;
+        }
+
         // Manejo de redirección
         int saved_stdout = dup(STDOUT_FILENO); // Guarda el stdout original
         int redirection_result = handle_redirection(args, &num_args);

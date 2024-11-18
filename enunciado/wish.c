@@ -141,7 +141,7 @@ int handle_redirection(char **args, int *num_args)
     {
         if (strcmp(args[i], ">") == 0)
         {
-            if (redirect_index != -1)
+            if (i == 0 || redirect_index != -1)
             {
                 // Ya hay un operador '>', error por múltiples operadores
                 write(STDERR_FILENO, error_message, strlen(error_message));

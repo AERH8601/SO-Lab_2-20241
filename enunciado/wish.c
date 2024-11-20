@@ -7,10 +7,12 @@
 #include <fcntl.h>
 #include <linux/stat.h>
 #include <sys/stat.h>
+#include <stdbool.h>
 
 #define MAX_INPUT 1024 // Tamaño máximo de entrada para una línea de comando
 #define MAX_ARGS 64    // Máximo número de argumentos en un comando
 #define MAX_PATH 10    // Máximo número de rutas en el path de búsqueda
+#define MAX_TEMP_FILES 128
 
 // Mensaje de error estándar para todos los tipos de error en el shell
 char error_message[30] = "An error has occurred\n";
@@ -18,6 +20,8 @@ char error_message[30] = "An error has occurred\n";
 // Arreglo de cadenas para almacenar el path de búsqueda
 char *path[MAX_PATH];
 int path_count = 0; // Contador de directorios en el path de búsqueda
+char temp_file_list[MAX_TEMP_FILES][256];
+int temp_file_count = 0;
 
 // Función para inicializar el path de búsqueda predeterminado
 void initialize_path()
@@ -37,6 +41,27 @@ void free_path()
         path[i] = NULL;
     }
     path_count = 0;
+}
+
+// Agrega un archivo temporal a la lista global
+void add_temp_file(const char *filename)
+{
+    if (temp_file_count < MAX_TEMP_FILES)
+    {
+        strncpy(temp_file_list[temp_file_count], filename, sizeof(temp_file_list[temp_file_count]) - 1);
+        temp_file_list[temp_file_count][sizeof(temp_file_list[temp_file_count]) - 1] = '\0';
+        temp_file_count++;
+    }
+}
+
+// Elimina todos los archivos temporales al final del programa
+void cleanup_temp_files()
+{
+    for (int i = 0; i < temp_file_count; i++)
+    {
+        unlink(temp_file_list[i]); // Elimina el archivo
+    }
+    temp_file_count = 0; // Reinicia el contador
 }
 
 // Comando integrado "exit": finaliza el shell si no tiene argumentos adicionales
@@ -177,14 +202,6 @@ int handle_redirection(char **args, int *num_args)
         return -1;
     }
 
-    // Duplicar el descriptor de archivo al stdout
-    if (dup2(fd, STDOUT_FILENO) == -1)
-    {
-        close(fd);
-        write(STDERR_FILENO, error_message, strlen(error_message));
-        return -1;
-    }
-
     close(fd);
     return 1; // Indica que la redirección fue exitosa
 }
@@ -192,20 +209,12 @@ int handle_redirection(char **args, int *num_args)
 // Manejo de comandos paralelos con redirección de salida única
 void execute_parallel_commands(char *input)
 {
-    char *subcommands[MAX_ARGS]; // Subcomandos separados por '&'
+    char *subcommands[MAX_ARGS];
     int num_subcommands = 0;
 
-    if (strspn(input, " \t&\n") == strlen(input))
-    {
-        // La línea contiene solo espacios, tabs y '&', no hacer nada
-        return;
-    }
-
-    // Divide el input en subcomandos usando '&' como delimitador
     char *token = strtok(input, "&");
     while (token != NULL && num_subcommands < MAX_ARGS)
     {
-        // Verifica si el subcomando es válido (no solo espacios en blanco)
         if (strlen(token) > 0 && strspn(token, " \t\n") != strlen(token))
         {
             subcommands[num_subcommands++] = token;
@@ -216,7 +225,6 @@ void execute_parallel_commands(char *input)
     pid_t pids[MAX_ARGS];
     char temp_files[MAX_ARGS][256];
 
-    // Ejecuta cada subcomando en un proceso hijo
     for (int i = 0; i < num_subcommands; i++)
     {
         char *args[MAX_ARGS];
@@ -225,7 +233,6 @@ void execute_parallel_commands(char *input)
         if (num_args == 0)
             continue;
 
-        // Crear un archivo temporal único para cada subcomando
         snprintf(temp_files[i], sizeof(temp_files[i]), "/tmp/output20%d", i + 1);
         int fd = open(temp_files[i], O_WRONLY | O_CREAT | O_TRUNC, S_IRWXU);
         if (fd == -1)
@@ -234,18 +241,15 @@ void execute_parallel_commands(char *input)
             continue;
         }
 
+        // Registrar el archivo temporal
+        add_temp_file(temp_files[i]);
+
         pid_t pid = fork();
         if (pid == 0)
         {
             // Proceso hijo
-            if (dup2(fd, STDOUT_FILENO) == -1)
-            {
-                close(fd);
-                write(STDERR_FILENO, error_message, strlen(error_message));
-                exit(1);
-            }
-            close(fd);
 
+            // Ejecuta el subcomando
             if (strcmp(args[0], "cd") == 0)
             {
                 run_cd(args, num_args);
@@ -262,13 +266,14 @@ void execute_parallel_commands(char *input)
             {
                 run_external_command(args);
             }
-            exit(0); // Finaliza el proceso hijo
+
+            exit(0); // Asegúrate de que el proceso hijo termine después de ejecutar el comando
         }
         else if (pid > 0)
         {
             // Proceso padre
             pids[i] = pid;
-            close(fd);
+            close(fd); // Importante: Cierra el descriptor de archivo en el padre
         }
         else
         {
@@ -282,11 +287,11 @@ void execute_parallel_commands(char *input)
     {
         if (pids[i] > 0)
         {
-            waitpid(pids[i], NULL, 0); // Espera a que el proceso hijo termine
+            waitpid(pids[i], NULL, 0);
         }
     }
 
-    // Leer y combinar la salida de los archivos temporales
+    // Leer y combinar la salida de los archivos temporales SOLO UNA VEZ
     for (int i = 0; i < num_subcommands; i++)
     {
         int fd = open(temp_files[i], O_RDONLY);
@@ -296,16 +301,14 @@ void execute_parallel_commands(char *input)
             ssize_t bytes_read;
             while ((bytes_read = read(fd, buffer, sizeof(buffer))) > 0)
             {
+                // Escribe en stdout desde los archivos temporales (solo una vez)
                 write(STDOUT_FILENO, buffer, bytes_read);
             }
             close(fd);
-            unlink(temp_files[i]); // Elimina el archivo temporal después de procesarlo
         }
         else
         {
-            char error_msg[512];
-            snprintf(error_msg, sizeof(error_msg), "cat: %s: No such file or directory\n", temp_files[i]);
-            write(STDERR_FILENO, error_msg, strlen(error_msg));
+            write(STDERR_FILENO, error_message, strlen(error_message));
         }
     }
 }
@@ -351,7 +354,6 @@ void shell_loop(FILE *input_stream)
         }
 
         // Manejo de redirección
-        int saved_stdout = dup(STDOUT_FILENO); // Guarda el stdout original
         int redirection_result = handle_redirection(args, &num_args);
         if (redirection_result == -1)
         {
@@ -390,11 +392,6 @@ void shell_loop(FILE *input_stream)
         }
 
         // Restaura el stdout original después de la redirección
-        if (redirection_result == 1)
-        {
-            dup2(saved_stdout, STDOUT_FILENO);
-            close(saved_stdout);
-        }
     }
 }
 
@@ -426,6 +423,9 @@ int main(int argc, char *argv[])
         fclose(batch_file);
     }
 
-    free_path(); // Libera la memoria del path de búsqueda
+    // Limpia los archivos temporales
+    cleanup_temp_files();
+
+    free_path();
     return 0;
 }

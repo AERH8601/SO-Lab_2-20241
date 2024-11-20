@@ -189,11 +189,132 @@ int handle_redirection(char **args, int *num_args)
     return 1; // Indica que la redirección fue exitosa
 }
 
+// Manejo de comandos paralelos con redirección de salida única
+void execute_parallel_commands(char *input)
+{
+    char *subcommands[MAX_ARGS]; // Subcomandos separados por '&'
+    int num_subcommands = 0;
+
+    if (strspn(input, " \t&\n") == strlen(input))
+    {
+        // La línea contiene solo espacios, tabs y '&', no hacer nada
+        return;
+    }
+
+    // Divide el input en subcomandos usando '&' como delimitador
+    char *token = strtok(input, "&");
+    while (token != NULL && num_subcommands < MAX_ARGS)
+    {
+        // Verifica si el subcomando es válido (no solo espacios en blanco)
+        if (strlen(token) > 0 && strspn(token, " \t\n") != strlen(token))
+        {
+            subcommands[num_subcommands++] = token;
+        }
+        token = strtok(NULL, "&");
+    }
+
+    pid_t pids[MAX_ARGS];
+    char temp_files[MAX_ARGS][256];
+
+    // Ejecuta cada subcomando en un proceso hijo
+    for (int i = 0; i < num_subcommands; i++)
+    {
+        char *args[MAX_ARGS];
+        int num_args = parse_input(subcommands[i], args);
+
+        if (num_args == 0)
+            continue;
+
+        // Crear un archivo temporal único para cada subcomando
+        snprintf(temp_files[i], sizeof(temp_files[i]), "/tmp/output20%d", i + 1);
+        int fd = open(temp_files[i], O_WRONLY | O_CREAT | O_TRUNC, S_IRWXU);
+        if (fd == -1)
+        {
+            write(STDERR_FILENO, error_message, strlen(error_message));
+            continue;
+        }
+
+        pid_t pid = fork();
+        if (pid == 0)
+        {
+            // Proceso hijo
+            if (dup2(fd, STDOUT_FILENO) == -1)
+            {
+                close(fd);
+                write(STDERR_FILENO, error_message, strlen(error_message));
+                exit(1);
+            }
+            close(fd);
+
+            if (strcmp(args[0], "cd") == 0)
+            {
+                run_cd(args, num_args);
+            }
+            else if (strcmp(args[0], "path") == 0)
+            {
+                set_path(args, num_args);
+            }
+            else if (strcmp(args[0], "exit") == 0)
+            {
+                run_exit(num_args);
+            }
+            else
+            {
+                run_external_command(args);
+            }
+            exit(0); // Finaliza el proceso hijo
+        }
+        else if (pid > 0)
+        {
+            // Proceso padre
+            pids[i] = pid;
+            close(fd);
+        }
+        else
+        {
+            // Error al hacer fork
+            write(STDERR_FILENO, error_message, strlen(error_message));
+        }
+    }
+
+    // Esperar a que todos los procesos hijos terminen
+    for (int i = 0; i < num_subcommands; i++)
+    {
+        if (pids[i] > 0)
+        {
+            waitpid(pids[i], NULL, 0); // Espera a que el proceso hijo termine
+        }
+    }
+
+    // Leer y combinar la salida de los archivos temporales
+    for (int i = 0; i < num_subcommands; i++)
+    {
+        int fd = open(temp_files[i], O_RDONLY);
+        if (fd != -1)
+        {
+            char buffer[1024];
+            ssize_t bytes_read;
+            while ((bytes_read = read(fd, buffer, sizeof(buffer))) > 0)
+            {
+                write(STDOUT_FILENO, buffer, bytes_read);
+            }
+            close(fd);
+            unlink(temp_files[i]); // Elimina el archivo temporal después de procesarlo
+        }
+        else
+        {
+            char error_msg[512];
+            snprintf(error_msg, sizeof(error_msg), "cat: %s: No such file or directory\n", temp_files[i]);
+            write(STDERR_FILENO, error_msg, strlen(error_msg));
+        }
+    }
+}
+
 // Loop principal del shell: muestra el prompt, lee entrada, y ejecuta comandos
 void shell_loop(FILE *input_stream)
 {
     char input[MAX_INPUT]; // Buffer para la línea de entrada
-    char *args[MAX_ARGS];  // Arreglo para almacenar los argumentos
+    char *args[MAX_ARGS];  // Arreglo para almacenar los argumentoss
     int num_args;          // Número de argumentos en la línea de entrada
 
     while (1)
@@ -209,6 +330,13 @@ void shell_loop(FILE *input_stream)
         if (fgets(input, sizeof(input), input_stream) == NULL)
         {
             break; // EOF
+        }
+
+        // Manejo de comandos paralelos
+        if (strchr(input, '&') != NULL)
+        {
+            execute_parallel_commands(input);
+            continue;
         }
 
         // Divide la línea en argumentos y cuenta los argumentos
